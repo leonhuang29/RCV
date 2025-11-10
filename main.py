@@ -7,8 +7,8 @@ def main():
     voter_positions = [-1.0, -0.5, 0.0, 0.5, 1.0]
     seats = 3
     k = 3
-    density1 = [1, 1, 1, 3, 5]
-    output_dir = "results/11135"
+    density1 = [1, 1, 1, 1, 1]
+    output_dir = "results/11111"
 
     #find_nash_equilibria(left_possibilities, right_possibilities, k, voter_positions, seats)
     #best_response_right(left_possibilities, right_possibilities, k, voter_positions, seats)
