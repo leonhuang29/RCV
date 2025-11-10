@@ -1,195 +1,146 @@
 import numpy as np
-from collections import defaultdict
 from math import floor
-import math
+from copy import deepcopy
+from itertools import combinations_with_replacement as comb
+
 
 class Election:
-    def __init__(self, left_positions, right_positions, voter_positions, seats, voter_densities=None, tol=1e-9):
-        self.candidates = []
-        for i, pos in enumerate(left_positions):
-            self.candidates.append(("L", i, pos))
-        for i, pos in enumerate(right_positions):
-            self.candidates.append(("R", i, pos))
-
+    def __init__(self, left_positions, right_positions, voter_positions, seats, voter_densities = None, tol = 1e-9):
+        """
+        left_positions, right_positions: lists of candidate coordinates
+        voter_positions: list of positions (floats)
+        voter_weights: list of weights (same length as voter_positions)
+        seats: number of available seats
+        """
+        self.left_positions = list(left_positions)
+        self.right_positions = list(right_positions)
         self.voter_positions = list(voter_positions)
-        self.voter_densities = (
-            np.array(voter_densities, dtype=float)
-            if voter_densities is not None
-            else np.ones(len(voter_positions))
+        self.voter_weights = (
+            [1.0] * len(voter_positions)
+            if voter_densities is None
+            else list(voter_densities)
         )
-        self.seats = int(seats)
-        self.tol = tol
-        self.n_cand = len(self.candidates)
-        self.n_voters = len(self.voter_positions)
+        assert len(self.voter_positions) == len(self.voter_weights)
+        self.seats = seats
 
-    def _build_ballots(self):
-        rank_groups = []
-        for vpos in self.voter_positions:
-            dists = np.array([abs(vpos - c[2]) for c in self.candidates])
-            uniq = sorted(set([round(float(d), 9) for d in dists]))
-            groups = []
-            for d in uniq:
-                group = tuple(i for i, dist in enumerate(dists) if abs(dist - d) <= self.tol)
-                if group:
-                    groups.append(group)
-            rank_groups.append(tuple(groups))
-        return rank_groups
-    
+        # Build voter dictionary {position: weight}
+        self.voters = {p: w for p, w in zip(self.voter_positions, self.voter_weights)}
+
+        # Build candidate list: (party, idx, position)
+        self.candidates = []
+        i = 0
+        for j, pos in enumerate(self.left_positions):
+            self.candidates.append(("L", i, pos))
+            i += 1
+        for j, pos in enumerate(self.right_positions):
+            self.candidates.append(("R", i, pos))
+            i += 1
+
+    # -------------------------------
+    # Internal recursive STV method
+    # -------------------------------
+    def _vote(self, candidates, voters, quota, elected):
+        candidates = deepcopy(candidates)
+        voters = deepcopy(voters)
+        elected = deepcopy(elected)
+
+        num_elected = sum(elected.values())
+
+        while num_elected < self.seats:
+            # if remaining candidates == remaining seats, elect them all
+            if len(candidates) == (self.seats - num_elected):
+                for (party, _, _) in candidates:
+                    elected[party] += 1
+                return elected
+
+            # calculate votes
+            votes = [[0, {}] for _ in candidates]
+            for voter_pos in voters:
+                l = min(abs(voter_pos - c[2]) for c in candidates)
+                nearest = [i for i, c in enumerate(candidates) if abs(c[2] - voter_pos) == l]
+                for i in nearest:
+                    votes[i][0] += voters[voter_pos] / len(nearest)
+                    votes[i][1][voter_pos] = voters[voter_pos] / len(nearest)
+
+            max_votes = max(v[0] for v in votes)
+            min_votes = min(v[0] for v in votes)
+            winners = [i for i, v in enumerate(votes) if v[0] == max_votes]
+            losers = [i for i, v in enumerate(votes) if v[0] == min_votes]
+
+            # Elect winners if they meet quota
+            if max_votes >= quota:
+                # Simple winner
+                if len(winners) == 1:
+                    [winner] = winners
+                    elected[candidates[winner][0]] += 1
+                    num_elected += 1
+                    surplus = max_votes - quota
+                    factor = surplus / max_votes if max_votes > 0 else 0.0
+                    recv = votes[winner][1]
+                    for voter_pos in recv:
+                        voters[voter_pos] -= recv[voter_pos] * factor
+                    candidates.pop(winner)
+                else:
+                    # Tied winners → average over branches
+                    results = []
+                    for winner in winners:
+                        w_elected = deepcopy(elected)
+                        w_candidates = deepcopy(candidates)
+                        w_voters = deepcopy(voters)
+
+                        w_elected[candidates[winner][0]] += 1
+                        w_candidates.pop(winner)
+
+                        surplus = max_votes - quota
+                        factor = surplus / max_votes if max_votes > 0 else 0.0
+                        recv = votes[winner][1]
+                        for voter_pos in recv:
+                            w_voters[voter_pos] -= recv[voter_pos] * factor
+
+                        res = self._vote(w_candidates, w_voters, quota, w_elected)
+                        results.append(res)
+                    # average over outcomes
+                    avg = {"L": np.mean([r["L"] for r in results]),
+                           "R": np.mean([r["R"] for r in results])}
+                    return avg
+            else:
+                # Eliminate lowest
+                if len(losers) == 1:
+                    [loser] = losers
+                    candidates.pop(loser)
+                else:
+                    # Multiple tied losers → average over branches
+                    results = []
+                    for loser in losers:
+                        w_candidates = deepcopy(candidates)
+                        w_candidates.pop(loser)
+                        res = self._vote(w_candidates, voters, quota, elected)
+                        results.append(res)
+                    avg = {"L": np.mean([r["L"] for r in results]),
+                           "R": np.mean([r["R"] for r in results])}
+                    return avg
+
+        return elected
+
+    # -------------------------------
+    # Public method
+    # -------------------------------
     def run(self):
-        rank_groups = self._build_ballots()
-        n_cand = self.n_cand
-        n_voters = self.n_voters
-        seats = self.seats
-        weights = self.voter_densities.copy()
+        num_voters = sum(self.voters.values())
+        quota = floor(num_voters / (self.seats + 1)) + 1
 
-        # initial allocation (fractions of each voter's single vote)
-        alloc = [[0.0]*n_cand for _ in range(n_voters)]
-        for vi, groups in enumerate(rank_groups):
-            top = groups[0]
-            share = 1.0 / len(top)
-            for j in top:
-                alloc[vi][j] = share
+        elected = {"L": 0, "R": 0}
+        res = self._vote(self.candidates, self.voters, quota, elected)
 
-        total_votes = float(np.sum(weights))
-        quota = math.floor(total_votes / (seats + 1)) + 1
+        # per-candidate seat distribution (we don’t track individual candidate wins in this simple model)
+        per_candidate = {c: 0.0 for c in self.candidates}
+        # all L candidates share L’s seats equally, same for R
+        nL = len(self.left_positions)
+        nR = len(self.right_positions)
+        for c in per_candidate:
+            if c[0] == "L":
+                per_candidate[c] = res["L"] / nL
+            else:
+                per_candidate[c] = res["R"] / nR
 
-        memo = {}
-
-        def stv_recursive(alloc_state, active_set, seats_left):
-            """
-            alloc_state: n_voters x n_cand array-like where each row is fractions summing to 1 (for remaining prefs)
-            active_set: set of active candidate indices
-            seats_left: how many seats remain to allocate
-
-            RETURNS: defaultdict(float) mapping candidate_index -> expected number of seats (for the seats_left)
-            """
-            active_idxs = tuple(sorted(active_set))
-            # base cases
-            if seats_left == 0 or not active_idxs:
-                return defaultdict(float)
-
-            # if fewer or equal candidates than seats_left, give each one seat
-            if len(active_idxs) <= seats_left:
-                out = defaultdict(float)
-                for j in active_idxs:
-                    out[j] += 1.0
-                return out
-
-            # compute totals
-            totals = [0.0]*n_cand
-            for vi in range(n_voters):
-                row = alloc_state[vi]
-                for j in active_idxs:
-                    totals[j] += weights[vi] * row[j]
-
-            # memo key: active set, seats left, rounded totals for numeric stability
-            key = (active_idxs, seats_left, tuple(round(totals[j], 9) for j in active_idxs))
-            if key in memo:
-                return memo[key].copy()
-
-            max_vote = max(totals[j] for j in active_idxs)
-
-            out_acc = defaultdict(float)
-
-            # If any candidate(s) meet or exceed quota, process those as winners (handle ties)
-            over_quota = [j for j in active_idxs if totals[j] >= quota - self.tol]
-            if over_quota:
-                # resolve ties among all over-quota candidates (average branches)
-                for winner in over_quota:
-                    # make copies of alloc_state for branch
-                    new_alloc = [list(row) for row in alloc_state]
-                    new_active = set(active_set)
-                    new_active.remove(winner)
-
-                    total_w = totals[winner]
-                    surplus = total_w - quota
-                    if surplus > 0:
-                        factor = surplus / total_w
-                        # for each voter, subtract the fractional part corresponding to winner*factor
-                        for vi in range(n_voters):
-                            w_share = new_alloc[vi][winner]
-                            if w_share <= 0:
-                                continue
-                            # reduce winner's fraction by w_share * factor
-                            reduction = w_share * factor
-                            new_alloc[vi][winner] -= reduction
-                            # compute the absolute transferable mass (weights[vi] * reduction)
-                            transferable_mass = weights[vi] * reduction
-                            # find next alive preference group for this voter
-                            groups = rank_groups[vi]
-                            found_idx = None
-                            for gi, g in enumerate(groups):
-                                if winner in g:
-                                    found_idx = gi
-                                    break
-                            if found_idx is not None:
-                                for g in groups[found_idx+1:]:
-                                    alive = [c for c in g if c in new_active]
-                                    if alive:
-                                        # split transferable mass equally among alive choices
-                                        per_cand_mass = transferable_mass / len(alive)
-                                        # convert to alloc fractions by dividing by the voter's total weight
-                                        # (so alloc entries stay as fractions of the voter's vote)
-                                        for cid in alive:
-                                            new_alloc[vi][cid] += per_cand_mass / weights[vi]
-                                        break
-                    # recurse for remaining seats
-                    sub = stv_recursive(new_alloc, new_active, seats_left - 1)
-                    # aggregate: winner gets 1 seat in this branch plus whatever sub returns
-                    for j, val in sub.items():
-                        out_acc[j] += val / len(over_quota)
-                    out_acc[winner] += 1.0 / len(over_quota)
-
-                memo[key] = out_acc.copy()
-                return out_acc
-
-            # Otherwise no one meets quota -> eliminate lowest (handle ties by averaging)
-            min_vote = min(totals[j] for j in active_idxs)
-            losers_tied = [j for j in active_idxs if abs(totals[j] - min_vote) <= self.tol]
-
-            for loser in losers_tied:
-                new_alloc = [list(row) for row in alloc_state]
-                new_active = set(active_set)
-                new_active.remove(loser)
-
-                # transfer all of loser's fractions
-                for vi in range(n_voters):
-                    w_share = new_alloc[vi][loser]
-                    if w_share <= 0:
-                        continue
-                    new_alloc[vi][loser] = 0.0
-                    transferable_mass = weights[vi] * w_share
-                    groups = rank_groups[vi]
-                    found_idx = None
-                    for gi, g in enumerate(groups):
-                        if loser in g:
-                            found_idx = gi
-                            break
-                    if found_idx is not None:
-                        for g in groups[found_idx+1:]:
-                            alive = [c for c in g if c in new_active]
-                            if alive:
-                                per_cand_mass = transferable_mass / len(alive)
-                                for cid in alive:
-                                    new_alloc[vi][cid] += per_cand_mass / weights[vi]
-                                break
-
-                sub = stv_recursive(new_alloc, new_active, seats_left)
-                for j, val in sub.items():
-                    out_acc[j] += val / len(losers_tied)
-
-            memo[key] = out_acc.copy()
-            return out_acc
-
-        winners_expected = stv_recursive(alloc, set(range(n_cand)), seats)
-        per_candidate = {self.candidates[j]: winners_expected.get(j, 0.0) for j in range(n_cand)}
-        left_total = sum(val for cand, val in per_candidate.items() if cand[0] == "L")
-        right_total = sum(val for cand, val in per_candidate.items() if cand[0] == "R")
-
-        # sanity check (should sum to seats)
-        total_allocated = sum(per_candidate.values())
-        if abs(total_allocated - seats) > 1e-6:
-            # small numeric tolerance allowed; otherwise warn
-            print(f"Warning: total expected seats = {total_allocated}, expected = {seats}")
-
-        return {"left": left_total, "right": right_total, "per_candidate": per_candidate}
+        return {"left": res["L"], "right": res["R"], "per_candidate": per_candidate}
