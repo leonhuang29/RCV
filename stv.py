@@ -3,6 +3,8 @@ np.set_printoptions(linewidth=np.inf)
 from math import floor
 from copy import deepcopy
 from itertools import combinations_with_replacement as comb
+from scipy.optimize import linprog
+
 
 # helper function for recursion
 def vote(candidates, voters, quota, elected, seats):
@@ -135,33 +137,77 @@ def payoff(possible, size, voters, seats):
   return payoff, strategies
 
 def pure_nash(payoff):
-    n = payoff.shape[-1]
-    shape = payoff.shape[:-1]
-    eq = []
-    for idx in np.ndindex(*shape):
-        for p in range(n):
-            others = tuple(slice(None) if i == p else j for i, j in enumerate(idx))
-            if payoff[idx + (p,)] < payoff[others + (p,)].max():
-                break
-        else:
-            eq.append(idx)
-    return eq
+  n = payoff.shape[-1]
+  shape = payoff.shape[:-1]
+  eq = []
+  for idx in np.ndindex(*shape):
+    for p in range(n):
+      others = tuple(slice(None) if i == p else j for i, j in enumerate(idx))
+      if payoff[idx + (p,)] < payoff[others + (p,)].max():
+        break
+    else:
+      eq.append(idx)
+  return eq
+
+def mixed_nash(payoff):
+  assert payoff.shape[-1] == 2, "2-player game required"
+  
+  A = payoff[..., 0]
+  m, n = A.shape
+
+  # LP for "row player"
+  c = np.r_[np.zeros(m), -1] # max v
+  # deviation constraints (no opponent column gives > v)
+  A_dev = np.hstack([-A.T, np.ones((n, 1))])
+  b_dev = np.zeros(n)
+  # probability constraints (x sums to 1)
+  A_prob = np.hstack([np.ones((1, m)), np.zeros((1, 1))])
+  b_prob = [1]
+
+  # solve LP
+  res = linprog(
+    c,
+    A_ub=A_dev, b_ub=b_dev,
+    A_eq=A_prob, b_eq=b_prob,
+    bounds=[(0, 1)] * m + [(None, None)]
+  )
+
+  x, v = res.x[:m], res.x[-1]
+  y = res.ineqlin.marginals # get dual variables
+  y = y / y.sum()
+  return x, y, v
+
+def find_nash(possible, size, voters, seats):
+  # get payoff matrix and strategies
+  results, strategies = payoff(possible, size, voters, seats)
+
+  # find pure nash
+  eqs = pure_nash(results)
+
+  print("Pure Nash Equilibria:")
+  for eq in eqs:
+    print(f" - {[strategies[p][eq[p]] for p in range(len(eq))]}")
+
+  # if mixed nash solvable (2-player zero-sum), find:
+  if (results.shape[-1] == 2):
+    x, y, v = mixed_nash(results)
+
+    print("\nMixed Nash Equilibrium:")
+    print("Party 1 strategy:")
+    for s, prob in zip(strategies[0], x):
+      if prob > 0: print(f"  {s}: {prob:.3f}")
+    print("Party 2 strategy:")
+    for s, prob in zip(strategies[1], y):
+      if prob > 0: print(f"  {s}: {prob:.3f}")
+    print(f"Game value: {v:.3f}")
 
 if __name__ == "__main__":
   possible = [
-      [-1, -0.5, 0],   # Party A possible positions
-      [0, 0.5, 1]      # Party B possible positions
+    [-1, -0.5, 0],   # Party 1 possible positions
+    [0, 0.5, 1]      # Party 2 possible positions
   ]
-  size = [3, 3]  # each chooses one position
+  size = [3, 3]  # each chooses three positions
   voters = {-1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1}
   seats = 3
 
-  result, strategies = payoff(possible, size, voters, seats)
-  print("Payoff matrix (Party A shown):\n", result[..., 0])
-
-  eqs = pure_nash(result)
-
-  # Convert indices to actual strategy choices
-  for eq in eqs:
-      actual = [strategies[p][eq[p]] for p in range(len(eq))]
-      print("Equilibrium strategies:", actual)
+  find_nash(possible, size, voters, seats)
