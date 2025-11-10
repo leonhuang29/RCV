@@ -1,7 +1,10 @@
 import numpy as np
+np.set_printoptions(linewidth=np.inf)
 from math import floor
 from copy import deepcopy
+from itertools import combinations_with_replacement as comb
 
+# helper function for recursion
 def vote(candidates, voters, quota, elected, seats):
   # copy structures
   candidates = deepcopy(candidates)
@@ -114,14 +117,51 @@ def elect(parties, voters, seats):
 
   return vote(candidates, voters, quota, [0] * len(parties), seats)
 
+# possible: list of possible positions for each party
+# size: list of sizes for each party
+# voters: dictionary of voter positions with densities
+# seats: number of seats up for grabs
+def payoff(possible, size, voters, seats):
+  strategies = [list(comb(p, s)) for p, s in zip(possible, size)]
+  payoff = np.zeros([len(s) for s in strategies] + [len(size)])
+
+  for index in np.ndindex(*[len(s) for s in strategies]):
+    # current strategy vector
+    s = [strategies[i][index[i]] for i in range(len(size))]
+
+    # compute and update payoffs for each party
+    payoff[index] = elect(s, voters, seats)
+
+  return payoff, strategies
+
+def pure_nash(payoff):
+    n = payoff.shape[-1]
+    shape = payoff.shape[:-1]
+    eq = []
+    for idx in np.ndindex(*shape):
+        for p in range(n):
+            others = tuple(slice(None) if i == p else j for i, j in enumerate(idx))
+            if payoff[idx + (p,)] < payoff[others + (p,)].max():
+                break
+        else:
+            eq.append(idx)
+    return eq
+
 if __name__ == "__main__":
-  parties = [[-1, -0.5, 0], [0, 0.5, 1]]
-  voters  = {-1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1}
-  seats   = 3
+  possible = [
+      [-1, -0.5, 0],   # Party A possible positions
+      [0, 0.5, 1]      # Party B possible positions
+  ]
+  size = [3, 3]  # each chooses one position
+  voters = {-1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1}
+  seats = 3
 
-  results = elect(parties, voters, seats)
+  result, strategies = payoff(possible, size, voters, seats)
+  print("Payoff matrix (Party A shown):\n", result[..., 0])
 
-  print("\nResults (number of seats per party):")
-  for i, r in enumerate(results):
-    print(f"  Party {i}: {r} seats")
+  eqs = pure_nash(result)
 
+  # Convert indices to actual strategy choices
+  for eq in eqs:
+      actual = [strategies[p][eq[p]] for p in range(len(eq))]
+      print("Equilibrium strategies:", actual)
