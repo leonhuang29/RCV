@@ -169,13 +169,65 @@ def mixed_nash(payoff):
     c,
     A_ub=A_dev, b_ub=b_dev,
     A_eq=A_prob, b_eq=b_prob,
-    bounds=[(0, 1)] * m + [(None, None)]
+    bounds=[(0, 1)] * m + [(None, None)],
+    method="highs"
   )
 
-  x, v = res.x[:m], res.x[-1]
-  y = res.ineqlin.marginals # get dual variables
-  y = y / y.sum()
-  return x, y, v
+  return res
+
+def find_solutions(res, payoff):
+  assert payoff.shape[-1] == 2, "2-player game required"
+
+  A = payoff[..., 0]
+  m, n = A.shape
+  
+  opt = res.x[-1]
+
+  r    = np.array(res.lower.marginals[:m])
+  free = np.where(np.isclose(r, 0.0, atol=1e-9))[0]
+
+  # deviation constraints (no opponent column gives > v)
+  A_dev = np.hstack([-A.T, np.ones((n, 1))])
+  b_dev = np.zeros(n)
+
+  # probability constraints (x sums to 1)
+  A_prob = np.hstack([np.ones((1, m)), np.zeros((1, 1))])
+  b_prob = [1]
+
+  # fix value to opt
+  A_v = np.r_[np.zeros(m), 1].reshape(1, m+1)
+  b_v = [opt]
+
+  # combined equality constraints
+  A_eq = np.vstack([A_prob, A_v])
+  b_eq = np.vstack([b_prob, b_v])
+
+  solutions = []
+
+  for i in free:
+    for direction in (-1, +1): # minimize/maximize x_i
+      c = np.zeros(m+1)
+      c[i] = direction
+
+      sol = linprog(
+        c,
+        A_ub=A_dev, b_ub=b_dev,
+        A_eq=A_eq,  b_eq=b_eq,
+        bounds=[(0,1)]*m + [(opt, opt)],
+        method="highs"
+      )
+      
+      if sol.success:
+        y = sol.ineqlin.marginals
+        solutions.append((sol.x[:m], y / y.sum()))
+
+  uniq = []
+  for x, y in solutions:
+    if not any(np.allclose(x, xx, atol=1e-8) for xx, _ in uniq):
+      uniq.append((x, y))
+
+  return uniq
+
 
 def find_nash(possible, size, voters, seats):
   # get payoff matrix and strategies
@@ -190,24 +242,26 @@ def find_nash(possible, size, voters, seats):
 
   # if mixed nash solvable (2-player zero-sum), find:
   if (results.shape[-1] == 2):
-    x, y, v = mixed_nash(results)
+    res = mixed_nash(results)
 
-    print("\nMixed Nash Equilibrium:")
-    print("Party 1 strategy:")
-    for s, prob in zip(strategies[0], x):
-      if prob > 0: print(f"  {s}: {prob:.3f}")
-    print("Party 2 strategy:")
-    for s, prob in zip(strategies[1], y):
-      if prob > 0: print(f"  {s}: {prob:.3f}")
-    print(f"Game value: {v:.3f}")
+    extremes = find_solutions(res, results)
+
+    print("\nMixed Nash Equilibrium (Extreme Points):")
+    for i, t in enumerate(extremes):
+      print(f"Point {i+1}:")
+      for i in range(2):
+        print(f"   Player {i+1}")
+        for s, prob in zip(strategies[i], t[i]):
+          if prob > 1e-12:
+            print(f"     - {s}: [{prob:.3f}]")
 
 if __name__ == "__main__":
   possible = [
-    [-1, -0.5, 0],   # Party 1 possible positions
-    [0, 0.5, 1]      # Party 2 possible positions
+    [-2, -1.5, -1, -0.5, 0, 0.5, 1],   # Party 1 possible positions
+    [-1, -0.5,  0,  0.5, 1, 1.5, 2]    # Party 2 possible positions
   ]
   size = [3, 3]  # each chooses three positions
-  voters = {-1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1}
+  voters = {-2: 1, -1.5: 1, -1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1, 1.5: 1, 2: 1}
   seats = 3
 
   find_nash(possible, size, voters, seats)
