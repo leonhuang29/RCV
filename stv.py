@@ -37,8 +37,10 @@ def vote(candidates, voters, quota, elected, seats):
     
     # elect if a candidate exceeds quota
     max_votes = max(v[0] for v in votes)
-    winners = [i for i, v in enumerate(votes) if v[0] == max_votes]
-    losers  = [i for i, v in enumerate(votes) if v[0] == min(v[0] for v in votes)]
+    min_votes = min(v[0] for v in votes)
+    eps = 1e-9
+    winners = [i for i, v in enumerate(votes) if v[0] >= max_votes - eps]
+    losers  = [i for i, v in enumerate(votes) if v[0] <= min_votes + eps]
     
     if (max_votes >= quota):
       # if there is only one winner, elect them
@@ -53,7 +55,7 @@ def vote(candidates, voters, quota, elected, seats):
         factor  = surplus / max_votes
         recv    = votes[winner][1]
         for voter in recv:
-          voters[voter] -= recv[voter] * factor
+          voters[voter] -= recv[voter] * (1 - factor)
       # otherwise, recurse to find expected value
       else:
         results = []
@@ -71,7 +73,7 @@ def vote(candidates, voters, quota, elected, seats):
           factor  = surplus / max_votes
           recv    = votes[winner][1]
           for voter in recv:
-            w_voters[voter] -= recv[voter] * factor
+            w_voters[voter] -= recv[voter] * (1 - factor)
           
           # recurse
           res = vote(w_candidates, w_voters, quota, w_elected, seats)
@@ -88,14 +90,15 @@ def vote(candidates, voters, quota, elected, seats):
       else:
         results = []
         for loser in losers:
-          # copy structure
           w_candidates = deepcopy(candidates)
+          w_voters     = deepcopy(voters)
+          w_elected    = deepcopy(elected)
+
           w_candidates.pop(loser)
 
-          # recurse
-          res = vote(w_candidates, voters, quota, elected, seats)
+          res = vote(w_candidates, w_voters, quota, w_elected, seats)
           results.append(res)
-        # average
+
         return [sum(x)/len(results) for x in zip(*results)]
 
   return elected
@@ -241,27 +244,50 @@ def find_nash(possible, size, voters, seats):
     print(f" - {[strategies[p][eq[p]] for p in range(len(eq))]}")
 
   # if mixed nash solvable (2-player zero-sum), find:
-  if (results.shape[-1] == 2):
-    res = mixed_nash(results)
+  # if (results.shape[-1] == 2):
+  #   res = mixed_nash(results)
 
-    extremes = find_solutions(res, results)
+  #   extremes = find_solutions(res, results)
 
-    print("\nMixed Nash Equilibrium (Extreme Points):")
-    for i, t in enumerate(extremes):
-      print(f"Point {i+1}:")
-      for i in range(2):
-        print(f"   Player {i+1}")
-        for s, prob in zip(strategies[i], t[i]):
-          if prob > 1e-12:
-            print(f"     - {s}: [{prob:.3f}]")
+  #   print("\nMixed Nash Equilibrium (Extreme Points):")
+  #   for i, t in enumerate(extremes):
+  #     print(f"Point {i+1}:")
+  #     for i in range(2):
+  #       print(f"   Player {i+1}")
+  #       for s, prob in zip(strategies[i], t[i]):
+  #         if prob > 1e-12:
+  #           print(f"     - {s}: [{prob:.3f}]")
 
 if __name__ == "__main__":
   possible = [
-    [-2, -1.5, -1, -0.5, 0, 0.5, 1],   # Party 1 possible positions
-    [-1, -0.5,  0,  0.5, 1, 1.5, 2]    # Party 2 possible positions
+    [0, 0.5, 1],   # Party 1 possible positions
+    [-1, -0.5, 0]    # Party 2 possible positions
   ]
   size = [3, 3]  # each chooses three positions
-  voters = {-2: 1, -1.5: 1, -1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1, 1.5: 1, 2: 1}
+  voters = {-1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1}
   seats = 3
 
   find_nash(possible, size, voters, seats)
+
+# if __name__ == "__main__":
+#   possible = [
+#     [0, 0.5, 1, 1.5, 2],   # Party 1 possible positions
+#     [-2, -1.5, -1, -0.5, 0]    # Party 2 possible positions
+#   ]
+#   size = [3, 3]  # each chooses three positions
+#   voters = {-2: 1, -1.5: 1, -1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1, 1.5: 1, 2: 1}
+#   seats = 3
+
+#   find_nash(possible, size, voters, seats)
+
+# if __name__ == "__main__":
+#   possible = [
+#     [0, 0.5, 1, 1.5, 2, 2.5, 3],   # Party 1 possible positions
+#     [-3, -2.5, -2, -1.5, -1, -0.5, 0]    # Party 2 possible positions
+#   ]
+#   size = [3, 3]  # each chooses three positions
+#   voters = {-3:1, -2.5:1, -2: 1, -1.5: 1, -1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1, 1.5: 1, 2: 1, 2.5:1, 3:1}
+#   seats = 3
+
+#   find_nash(possible, size, voters, seats)
+
