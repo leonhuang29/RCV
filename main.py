@@ -1,4 +1,5 @@
 from nash import find_nash_equilibria, best_response_right, brute_force_nash
+from hedge import run_hedge_experiment
 
 def main():
     
@@ -27,6 +28,12 @@ def main():
     #find_nash_equilibria(left_possibilities, right_possibilities, k, voter_positions, seats)
     #best_response_right(left_possibilities, right_possibilities, k, voter_positions, seats)
     brute_force_nash(left_possibilities, right_possibilities, k, voter_positions, seats, density1, output_dir, csv_name="nash_for_no_restriction.csv")
-    
+
+    # Run hedge experiment
+    print("\n" + "="*60)
+    print("Running Hedge Experiment")
+    print("="*60)
+    run_hedge_experiment()
+
 if __name__ == "__main__":
     main()
