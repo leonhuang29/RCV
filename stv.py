@@ -236,6 +236,10 @@ def find_nash(possible, size, voters, seats):
   # get payoff matrix and strategies
   results, strategies = payoff(possible, size, voters, seats)
 
+  np.savetxt('payoff.csv', results[..., 0], delimiter=',', fmt='%.1f')
+  with open("strategies.txt", "w") as f:
+    f.write(str(strategies))
+
   # find pure nash
   eqs = pure_nash(results)
 
@@ -258,16 +262,16 @@ def find_nash(possible, size, voters, seats):
   #         if prob > 1e-12:
   #           print(f"     - {s}: [{prob:.3f}]")
 
-if __name__ == "__main__":
-  possible = [
-    [0, 0.5, 1],   # Party 1 possible positions
-    [-1, -0.5, 0]    # Party 2 possible positions
-  ]
-  size = [3, 3]  # each chooses three positions
-  voters = {-1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1}
-  seats = 3
+# if __name__ == "__main__":
+#   possible = [
+#     [0, 0.5, 1],   # Party 1 possible positions
+#     [-1, -0.5, 0]    # Party 2 possible positions
+#   ]
+#   size = [3, 3]  # each chooses three positions
+#   voters = {-1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1}
+#   seats = 3
 
-  find_nash(possible, size, voters, seats)
+#   find_nash(possible, size, voters, seats)
 
 # if __name__ == "__main__":
 #   possible = [
@@ -280,14 +284,14 @@ if __name__ == "__main__":
 
 #   find_nash(possible, size, voters, seats)
 
-# if __name__ == "__main__":
-#   possible = [
-#     [0, 0.5, 1, 1.5, 2, 2.5, 3],   # Party 1 possible positions
-#     [-3, -2.5, -2, -1.5, -1, -0.5, 0]    # Party 2 possible positions
-#   ]
-#   size = [3, 3]  # each chooses three positions
-#   voters = {-3:1, -2.5:1, -2: 1, -1.5: 1, -1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1, 1.5: 1, 2: 1, 2.5:1, 3:1}
-#   seats = 3
+if __name__ == "__main__":
+  possible = [
+    [-2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5],   # Party 1 possible positions
+    [-2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5]    # Party 2 possible positions
+  ]
+  size = [3, 3]  # each chooses three positions
+  voters = {-2.5:1, -2: 1, -1.5: 1, -1: 1, -0.5: 1, 0: 1, 0.5: 1, 1: 1, 1.5: 1, 2: 1, 2.5:1}
+  seats = 3
 
-#   find_nash(possible, size, voters, seats)
+  find_nash(possible, size, voters, seats)
 
