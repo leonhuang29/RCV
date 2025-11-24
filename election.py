@@ -29,10 +29,10 @@ class Election:
         # Build candidate list: (party, idx, position)
         self.candidates = []
         i = 0
-        for j, pos in enumerate(self.left_positions):
+        for _, pos in enumerate(self.left_positions):
             self.candidates.append(("L", i, pos))
             i += 1
-        for j, pos in enumerate(self.right_positions):
+        for _, pos in enumerate(self.right_positions):
             self.candidates.append(("R", i, pos))
             i += 1
 
